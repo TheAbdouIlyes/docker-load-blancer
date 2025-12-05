@@ -1,0 +1,110 @@
+services:
+  haproxy:
+    image: haproxy:2.8
+    container_name: haproxy
+    ports:
+      - "80:80"
+    volumes:
+      - ./lb/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - backend
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - haproxy
+
+  backend:
+    build: ./backend
+    container_name: backend
+    environment:
+      - DB1_HOST=db1
+      - DB1_PORT=3306
+      - DB2_HOST=db2
+      - DB2_PORT=3306
+      - PORT=4000
+      - SERVER_ID=Server 1
+    # we will run 2 replicas with compose scale-like behavior below using restart
+    deploy: {}
+    ports:
+      - "4000"
+    command: ["node", "src/server.js"]
+    depends_on:
+      - db1
+      - db2
+
+  backend2:
+    build: ./backend
+    container_name: backend2
+    environment:
+      - DB1_HOST=db1
+      - DB1_PORT=3306
+      - DB2_HOST=db2
+      - DB2_PORT=3306
+      - PORT=4000
+      - SERVER_ID=Server 2
+    command: ["node", "src/server.js"]
+    depends_on:
+      - db1
+      - db2
+
+  db1:
+    image: mariadb:10.11
+    container_name: db1
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: voting
+    volumes:
+      - ./db/node1/my.cnf:/etc/mysql/my.cnf:ro
+      - db1_data:/var/lib/mysql
+      - ./db/node1/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  db2:
+    image: mariadb:10.11
+    container_name: db2
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: voting
+    volumes:
+      - ./db/node2/my.cnf:/etc/mysql/my.cnf:ro
+      - db2_data:/var/lib/mysql
+      - ./db/node2/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "3308:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  replication-setup:
+    build: ./db
+    container_name: replication-setup
+    environment:
+      - DB1_HOST=db1
+      - DB2_HOST=db2
+      - DB_PORT=3306
+      - MYSQL_ROOT_PASSWORD=rootpassword
+    command: ["/usr/local/bin/setup-replication.sh"]
+    depends_on:
+      db1:
+        condition: service_healthy
+      db2:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  db1_data:
+  db2_data:
