@@ -31,6 +31,17 @@ const pool2 = mysql.createPool({
 let db1Available = true;
 let db2Available = true;
 
+// Small helper to log DB selection per request
+function logDbChoice(dbName, sql) {
+  try {
+    const host = process.env.HOSTNAME || 'backend';
+    const summary = (sql || '').toString().replace(/\s+/g, ' ').trim().slice(0, 140);
+    console.log(`[DB] ${host} -> ${dbName} | ${summary}`);
+  } catch (e) {
+    // ignore logging errors
+  }
+}
+
 // Helper to check if a pool is available
 async function checkPoolHealth(pool, dbName) {
   try {
@@ -49,56 +60,40 @@ async function checkPoolHealth(pool, dbName) {
 // Helper to try queries on db1 first, fallback to db2
 // Returns { rows, dbUsed } where dbUsed is 'db1' or 'db2'
 async function queryWithFailover(sql, params = [], options = { write: false }) {
-  // Try db1 first if we think it's available
-  if (db1Available) {
+  // PRIMARY: Always try db1 first (master), SECONDARY: db2 (backup)
+  // NO round-robin - stick with db1 unless it fails
+  const primary = { pool: pool1, name: 'db1' };
+  const secondary = { pool: pool2, name: 'db2' };
+
+  try {
+    const [rows] = await Promise.race([
+      primary.pool.query(sql, params),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`${primary.name.toUpperCase()} query timeout`)), 5000))
+    ]);
+    // mark availability
+    if (primary.name === 'db1') db1Available = true; else db2Available = true;
+    // log chosen DB
+    logDbChoice(primary.name, sql);
+    return { rows, dbUsed: primary.name };
+  } catch (errPrimary) {
+    console.warn(`${primary.name.toUpperCase()} failed:`, errPrimary.message, 'Falling back to', secondary.name);
+    // try secondary
     try {
       const [rows] = await Promise.race([
-        pool1.query(sql, params),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('DB1 query timeout')), 5000))
+        secondary.pool.query(sql, params),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`${secondary.name.toUpperCase()} query timeout`)), 5000))
       ]);
-      return { rows, dbUsed: 'db1' };
-    } catch (e1) {
-      console.warn('DB1 failed:', e1.message, 'Trying DB2...');
-      db1Available = false; // Mark db1 as unavailable
-      
-      // Try db2
-      try {
-        const [rows] = await Promise.race([
-          pool2.query(sql, params),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('DB2 query timeout')), 5000))
-        ]);
-        db2Available = true; // Mark db2 as available
-        return { rows, dbUsed: 'db2' };
-      } catch (e2) {
-        console.error('DB2 failed too:', e2.message);
-        db2Available = false;
-        throw e2;
-      }
-    }
-  } else {
-    // db1 is marked as unavailable, try db2 directly
-    try {
-      const [rows] = await Promise.race([
-        pool2.query(sql, params),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('DB2 query timeout')), 5000))
-      ]);
-      db2Available = true;
-      return { rows, dbUsed: 'db2' };
-    } catch (e2) {
-      console.error('DB2 failed:', e2.message);
-      db2Available = false;
-      
-      // Last resort: try db1 again in case it recovered
-      try {
-        const [rows] = await Promise.race([
-          pool1.query(sql, params),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('DB1 query timeout')), 5000))
-        ]);
-        db1Available = true; // db1 recovered
-        return { rows, dbUsed: 'db1' };
-      } catch (e1) {
-        throw e2; // Throw the db2 error
-      }
+      if (secondary.name === 'db1') db1Available = true; else db2Available = true;
+      // mark primary as unavailable since it failed
+      if (primary.name === 'db1') db1Available = false; else db2Available = false;
+      // log chosen DB (fallback)
+      logDbChoice(secondary.name, sql);
+      return { rows, dbUsed: secondary.name };
+    } catch (errSecondary) {
+      // both failed
+      if (primary.name === 'db1') db1Available = false; else db2Available = false;
+      if (secondary.name === 'db1') db1Available = false; else db2Available = false;
+      throw errSecondary;
     }
   }
 }
