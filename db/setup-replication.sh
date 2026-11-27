@@ -37,20 +37,26 @@ wait_for_mysql "$DB2_HOST"
 echo "Waiting for initialization to complete..."
 sleep 5
 
-# Copy initial data from db1 to db2 (since db2 doesn't have insert statements)
-echo "Syncing initial data from db1 to db2..."
-mysql -h"$DB2_HOST" -P"$DB_PORT" -uroot -p"$ROOT_PASS" -e "SET FOREIGN_KEY_CHECKS=0; TRUNCATE TABLE voting.votes; TRUNCATE TABLE voting.admins; TRUNCATE TABLE voting.candidates; SET FOREIGN_KEY_CHECKS=1;" 2>/dev/null || true
+# Seed the default admin and candidates on db1. INSERT IGNORE keeps this safe
+# to re-run: existing accounts, candidates and votes are never overwritten.
+echo "Ensuring seed data on db1..."
+# Single quotes keep the bcrypt hash from being expanded by the shell.
+ADMIN_HASH='$2b$10$qt1v9dlVNQewX5oQSUhz6uJECv4kI7rrO7yS2B1FJrEx.hslTUX9q'
+mysql -h"$DB1_HOST" -P"$DB_PORT" -uroot -p"$ROOT_PASS" voting \
+  -e "INSERT IGNORE INTO admins (id, username, password, email) VALUES (1, 'admin', '$ADMIN_HASH', 'admin@voting.local');" 2>/dev/null || true
+mysql -h"$DB1_HOST" -P"$DB_PORT" -uroot -p"$ROOT_PASS" voting \
+  -e "INSERT IGNORE INTO candidates (id, name, description) VALUES (1, 'Candidate A', 'First candidate option'), (3, 'Candidate B', 'Second candidate option'), (5, 'Candidate C', 'Third candidate option');" 2>/dev/null || true
 
-# Copy admins with explicit IDs
-echo "Copying admins..."
+# Copy any missing seed rows from db1 to db2 without destroying data.
+# TRUNCATE here used to wipe admins/candidates/votes on every stack restart;
+# with master-master replication those truncates also reached db1.
+echo "Syncing missing seed data from db1 to db2..."
 mysql -h"$DB1_HOST" -P"$DB_PORT" -uroot -p"$ROOT_PASS" -sN -e "SELECT id, username, password, IFNULL(email,'') FROM voting.admins" 2>/dev/null | while IFS=$'\t' read -r id user pass email; do
-    mysql -h"$DB2_HOST" -P"$DB_PORT" -uroot -p"$ROOT_PASS" -e "INSERT INTO voting.admins (id, username, password, email) VALUES ($id, '$user', '$pass', '$email');" 2>/dev/null || true
+    mysql -h"$DB2_HOST" -P"$DB_PORT" -uroot -p"$ROOT_PASS" -e "INSERT IGNORE INTO voting.admins (id, username, password, email) VALUES ($id, '$user', '$pass', '$email');" 2>/dev/null || true
 done
 
-# Copy candidates with explicit IDs
-echo "Copying candidates..."
 mysql -h"$DB1_HOST" -P"$DB_PORT" -uroot -p"$ROOT_PASS" -sN -e "SELECT id, name, description FROM voting.candidates" 2>/dev/null | while IFS=$'\t' read -r id name desc; do
-    mysql -h"$DB2_HOST" -P"$DB_PORT" -uroot -p"$ROOT_PASS" -e "INSERT INTO voting.candidates (id, name, description) VALUES ($id, '$name', '$desc');" 2>/dev/null || true
+    mysql -h"$DB2_HOST" -P"$DB_PORT" -uroot -p"$ROOT_PASS" -e "INSERT IGNORE INTO voting.candidates (id, name, description) VALUES ($id, '$name', '$desc');" 2>/dev/null || true
 done
 
 echo "Data sync complete."

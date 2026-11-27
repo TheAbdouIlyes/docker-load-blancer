@@ -1,9 +1,23 @@
 import { useState, useEffect } from "react";
 import "./AdminDashboard.css";
+import { Brand, Icon, Notice, ServiceStatus, ThemeToggle } from "./Ui";
 
 const API = "/api";
 
-export default function AdminDashboard({ adminId, systemStatus, onLogout }) {
+const TABS = [
+  { id: "dashboard", label: "Dashboard", icon: "table" },
+  { id: "candidates", label: "Manage Candidates", icon: "users" },
+  { id: "votes", label: "Vote Details", icon: "ballot" },
+];
+
+export default function AdminDashboard({
+  adminId,
+  systemStatus,
+  backupStatus,
+  theme,
+  onToggleTheme,
+  onLogout,
+}) {
   const [candidates, setCandidates] = useState([]);
   const [statistics, setStatistics] = useState([]);
   const [voteDetails, setVoteDetails] = useState([]);
@@ -27,12 +41,13 @@ export default function AdminDashboard({ adminId, systemStatus, onLogout }) {
       loadVoteDetails();
     }, 5000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadCandidates = async () => {
     try {
       const res = await fetch(`${API}/admin/candidates?t=${Date.now()}`, {
-        cache: 'no-cache'
+        cache: "no-cache",
       });
       const data = await res.json();
       setCandidates(data.candidates || []);
@@ -46,7 +61,7 @@ export default function AdminDashboard({ adminId, systemStatus, onLogout }) {
       const res = await fetch(`${API}/admin/statistics`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ admin_id: adminId })
+        body: JSON.stringify({ admin_id: adminId }),
       });
       const data = await res.json();
       setStatistics(data.statistics || []);
@@ -60,7 +75,7 @@ export default function AdminDashboard({ adminId, systemStatus, onLogout }) {
       const res = await fetch(`${API}/admin/vote-details`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ admin_id: adminId })
+        body: JSON.stringify({ admin_id: adminId }),
       });
       const data = await res.json();
       setVoteDetails(data.voteDetails || []);
@@ -74,7 +89,7 @@ export default function AdminDashboard({ adminId, systemStatus, onLogout }) {
       showMessage("Candidate name is required", "error");
       return;
     }
-    
+
     setLoading(true);
     try {
       const res = await fetch(`${API}/admin/candidates`, {
@@ -83,8 +98,8 @@ export default function AdminDashboard({ adminId, systemStatus, onLogout }) {
         body: JSON.stringify({
           admin_id: adminId,
           name: newCandidateName,
-          description: newCandidateDesc
-        })
+          description: newCandidateDesc,
+        }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -103,14 +118,15 @@ export default function AdminDashboard({ adminId, systemStatus, onLogout }) {
   };
 
   const deleteCandidate = async (candidateId) => {
-    if (!window.confirm("Are you sure you want to delete this candidate?")) return;
-    
+    if (!window.confirm("Are you sure you want to delete this candidate?"))
+      return;
+
     setLoading(true);
     try {
       const res = await fetch(`${API}/admin/candidates/${candidateId}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ admin_id: adminId })
+        body: JSON.stringify({ admin_id: adminId }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -127,104 +143,187 @@ export default function AdminDashboard({ adminId, systemStatus, onLogout }) {
     }
   };
 
-  const totalVotes = statistics.reduce((sum, s) => sum + (s.vote_count || 0), 0);
+  const handleTabKeyDown = (event, index) => {
+    let nextIndex = null;
+    if (event.key === "ArrowRight") {
+      nextIndex = (index + 1) % TABS.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex = (index - 1 + TABS.length) % TABS.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = TABS.length - 1;
+    }
+
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextTab = TABS[nextIndex];
+    setActiveTab(nextTab.id);
+    document.getElementById(`${nextTab.id}-tab`)?.focus();
+  };
+
+  const totalVotes = statistics.reduce(
+    (sum, s) => sum + (s.vote_count || 0),
+    0
+  );
+  const dismissMessage = () => setMessage({ text: "", type: "" });
 
   return (
-    <div className="admin-dashboard">
-      <div className="admin-header">
-        <h1>👨‍💼 Admin Dashboard</h1>
-        <div className="admin-controls">
-          <div className="admin-info">
-            <span className="admin-badge">Admin ID: {adminId}</span>
-            <span className="server-info">Server: {systemStatus.server}</span>
-            <span className="db-info">Database: {systemStatus.database}</span>
+    <div
+      className={`vs-app admin-app vs-app--theme-${theme} vs-app--accent-red`}
+    >
+      <header className="vs-topbar">
+        <div className="vs-container vs-topbar__inner">
+          <div className="admin-heading">
+            <Brand />
+            <div className="admin-heading__text">
+              <p className="vs-eyebrow">Administration</p>
+              <h1>Dashboard</h1>
+            </div>
           </div>
-          <button className="btn btn-outline" onClick={onLogout}>
-            Logout
-          </button>
+          <div className="vs-topbar__actions">
+            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+            <div className="admin-account">
+              <span className="vs-badge vs-badge--muted">
+                Admin ID <strong>{adminId}</strong>
+              </span>
+              <button
+                type="button"
+                className="vs-button vs-button--secondary"
+                onClick={onLogout}
+              >
+                <Icon name="logout" />
+                Log out
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-
-      {message.text && (
-        <div className={`message message-${message.type}`}>
-          {message.text}
-          <button className="message-close" onClick={() => setMessage({ text: "", type: "" })}>×</button>
+        <div className="vs-container vs-topbar__status">
+          <ServiceStatus
+            systemStatus={systemStatus}
+            backupStatus={backupStatus}
+            compact
+          />
         </div>
-      )}
+      </header>
 
-      <div className="admin-tabs">
-        <button 
-          className={`tab-button ${activeTab === "dashboard" ? "active" : ""}`}
-          onClick={() => setActiveTab("dashboard")}
-        >
-          📊 Dashboard
-        </button>
-        <button 
-          className={`tab-button ${activeTab === "candidates" ? "active" : ""}`}
-          onClick={() => setActiveTab("candidates")}
-        >
-          👥 Manage Candidates
-        </button>
-        <button 
-          className={`tab-button ${activeTab === "votes" ? "active" : ""}`}
-          onClick={() => setActiveTab("votes")}
-        >
-          🗳️ Vote Details
-        </button>
-      </div>
+      <Notice message={message} onDismiss={dismissMessage} />
 
-      {activeTab === "dashboard" && (
-        <div className="tab-content">
-          <div className="card">
-            <h2>📈 Voting Statistics</h2>
-            <div className="stats-overview">
-              <div className="stat-box">
-                <div className="stat-label">Total Votes</div>
-                <div className="stat-number">{totalVotes}</div>
+      <main className="admin-main">
+        <nav className="admin-tabs" role="tablist" aria-label="Admin sections">
+          {TABS.map((tab, index) => (
+            <button
+              key={tab.id}
+              id={`${tab.id}-tab`}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              aria-controls={`${tab.id}-panel`}
+              tabIndex={activeTab === tab.id ? 0 : -1}
+              className="admin-tab"
+              onClick={() => setActiveTab(tab.id)}
+              onKeyDown={(event) => handleTabKeyDown(event, index)}
+            >
+              <Icon name={tab.icon} />
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        {activeTab === "dashboard" && (
+          <section
+            id="dashboard-panel"
+            role="tabpanel"
+            aria-labelledby="dashboard-tab"
+            className="vs-surface admin-panel"
+          >
+            <div className="vs-surface__header">
+              <div>
+                <p className="vs-eyebrow">Overview</p>
+                <h2>Voting statistics</h2>
               </div>
-              <div className="stat-box">
-                <div className="stat-label">Total Candidates</div>
-                <div className="stat-number">{candidates.length}</div>
+              <span className="vs-badge">{candidates.length} candidates</span>
+            </div>
+
+            <div className="stats-overview">
+              <div className="admin-stat">
+                <span className="admin-stat__label">Total votes</span>
+                <span className="admin-stat__value">{totalVotes}</span>
+              </div>
+              <div className="admin-stat">
+                <span className="admin-stat__label">Total candidates</span>
+                <span className="admin-stat__value">{candidates.length}</span>
               </div>
             </div>
 
             {statistics.length === 0 ? (
-              <div className="no-data">No voting data yet</div>
+              <div className="vs-empty">
+                <h3>No voting data yet</h3>
+                <p>Results will appear here once votes are recorded.</p>
+              </div>
             ) : (
-              <div className="statistics-container">
+              <ul className="admin-stat-list">
                 {statistics.map((stat) => {
-                  const percentage = totalVotes > 0 ? ((stat.vote_count / totalVotes) * 100).toFixed(1) : 0;
+                  const percentage =
+                    totalVotes > 0
+                      ? ((stat.vote_count / totalVotes) * 100).toFixed(1)
+                      : 0;
                   return (
-                    <div key={stat.id} className="stat-item">
-                      <div className="stat-info">
-                        <h3>{stat.name}</h3>
-                        <span className="vote-count">{stat.vote_count} votes ({percentage}%)</span>
+                    <li key={stat.id} className="admin-stat-row">
+                      <div className="admin-stat-row__header">
+                        <span className="admin-stat-row__name">{stat.name}</span>
+                        <span className="admin-stat-row__count">
+                          {stat.vote_count} votes ({percentage}%)
+                        </span>
                       </div>
-                      <div className="stat-bar-container">
-                        <div 
-                          className="stat-bar" 
+                      <div
+                        className="vs-progress"
+                        role="progressbar"
+                        aria-label={`${stat.name}: ${stat.vote_count} votes, ${percentage}%`}
+                        aria-valuemin={0}
+                        aria-valuemax={totalVotes}
+                        aria-valuenow={stat.vote_count || 0}
+                      >
+                        <div
+                          className="vs-progress__fill"
                           style={{ width: `${percentage}%` }}
-                        ></div>
+                        />
                       </div>
-                    </div>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             )}
-          </div>
-        </div>
-      )}
+          </section>
+        )}
 
-      {activeTab === "candidates" && (
-        <div className="tab-content">
-          <div className="card">
-            <h2>👥 Manage Candidates</h2>
-            
-            <div className="add-candidate-form">
-              <h3>Add New Candidate</h3>
-              <div className="form-group">
-                <label>Candidate Name</label>
+        {activeTab === "candidates" && (
+          <section
+            id="candidates-panel"
+            role="tabpanel"
+            aria-labelledby="candidates-tab"
+            className="vs-surface admin-panel"
+          >
+            <div className="vs-surface__header">
+              <div>
+                <p className="vs-eyebrow">Ballot management</p>
+                <h2>Manage candidates</h2>
+              </div>
+            </div>
+
+            <form
+              className="admin-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                addCandidate();
+              }}
+            >
+              <div className="vs-field">
+                <label className="vs-field__label" htmlFor="new-candidate-name">
+                  Candidate name
+                </label>
                 <input
+                  id="new-candidate-name"
                   type="text"
                   placeholder="Enter candidate name"
                   value={newCandidateName}
@@ -232,83 +331,125 @@ export default function AdminDashboard({ adminId, systemStatus, onLogout }) {
                   disabled={loading}
                 />
               </div>
-              <div className="form-group">
-                <label>Description (Optional)</label>
+              <div className="vs-field">
+                <label
+                  className="vs-field__label"
+                  htmlFor="new-candidate-description"
+                >
+                  Description <span className="vs-field__optional">(optional)</span>
+                </label>
                 <textarea
+                  id="new-candidate-description"
                   placeholder="Enter candidate description"
                   value={newCandidateDesc}
                   onChange={(e) => setNewCandidateDesc(e.target.value)}
                   disabled={loading}
                   rows="3"
-                ></textarea>
+                />
               </div>
-              <button 
-                className="btn btn-primary"
-                onClick={addCandidate}
-                disabled={loading}
-              >
-                {loading ? "Adding..." : "Add Candidate"}
-              </button>
-            </div>
+              <div className="admin-form__actions">
+                <button
+                  type="submit"
+                  className="vs-button vs-button--primary"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <>
+                      <span className="vs-spinner" aria-hidden="true" />
+                      Adding…
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="plus" />
+                      Add candidate
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
 
-            <div className="candidates-list">
-              <h3>Current Candidates</h3>
+            <div className="admin-candidates">
+              <h3>Current candidates</h3>
               {candidates.length === 0 ? (
-                <div className="no-data">No candidates yet</div>
+                <div className="vs-empty">
+                  <h3>No candidates yet</h3>
+                  <p>Add a candidate to start building the ballot.</p>
+                </div>
               ) : (
-                <div className="list">
+                <ul className="admin-candidate-list">
                   {candidates.map((candidate) => (
-                    <div key={candidate.id} className="candidate-item">
-                      <div className="candidate-info">
+                    <li key={candidate.id} className="admin-candidate">
+                      <div className="admin-candidate__body">
                         <h4>{candidate.name}</h4>
                         {candidate.description && (
-                          <p className="description">{candidate.description}</p>
+                          <p className="admin-candidate__description">
+                            {candidate.description}
+                          </p>
                         )}
-                        <small className="created-at">
+                        <span className="admin-candidate__meta">
                           Created: {new Date(candidate.created_at).toLocaleString()}
-                        </small>
+                        </span>
                       </div>
-                      <button 
-                        className="btn btn-danger"
-                        onClick={() => deleteCandidate(candidate.id)}
-                        disabled={loading}
-                      >
-                        Delete
-                      </button>
-                    </div>
+                      <div className="admin-candidate__footer">
+                        <button
+                          type="button"
+                          className="vs-button vs-button--danger"
+                          onClick={() => deleteCandidate(candidate.id)}
+                          disabled={loading}
+                          aria-label={`Delete ${candidate.name}`}
+                        >
+                          <Icon name="trash" />
+                          Delete
+                        </button>
+                      </div>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
             </div>
-          </div>
-        </div>
-      )}
+          </section>
+        )}
 
-      {activeTab === "votes" && (
-        <div className="tab-content">
-          <div className="card">
-            <h2>🗳️ Vote Details</h2>
-            <div className="vote-details-refresh">
-              <button 
-                className="btn btn-icon"
+        {activeTab === "votes" && (
+          <section
+            id="votes-panel"
+            role="tabpanel"
+            aria-labelledby="votes-tab"
+            className="vs-surface admin-panel"
+          >
+            <div className="vs-surface__header">
+              <div>
+                <p className="vs-eyebrow">Audit log</p>
+                <h2>Vote details</h2>
+              </div>
+              <button
+                type="button"
+                className="vs-button vs-button--quiet vs-button--icon"
                 onClick={loadVoteDetails}
-                title="Refresh"
+                aria-label="Refresh vote details"
+                title="Refresh vote details"
               >
-                🔄
+                <Icon name="refresh" />
               </button>
             </div>
 
             {voteDetails.length === 0 ? (
-              <div className="no-data">No votes recorded yet</div>
+              <div className="vs-empty">
+                <h3>No votes recorded yet</h3>
+                <p>Recorded ballots will appear in this table.</p>
+              </div>
             ) : (
-              <div className="vote-details-table">
-                <table>
+              <div className="vote-details__table-wrap">
+                <table className="vote-details__table">
+                  <caption className="vs-visually-hidden">
+                    Recorded votes
+                  </caption>
                   <thead>
                     <tr>
-                      <th>User ID</th>
-                      <th>Username</th>
-                      <th>Candidate</th>
-                      <th>Timestamp</th>
+                      <th scope="col">User ID</th>
+                      <th scope="col">Username</th>
+                      <th scope="col">Candidate</th>
+                      <th scope="col">Timestamp</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -324,9 +465,9 @@ export default function AdminDashboard({ adminId, systemStatus, onLogout }) {
                 </table>
               </div>
             )}
-          </div>
-        </div>
-      )}
+          </section>
+        )}
+      </main>
     </div>
   );
 }
